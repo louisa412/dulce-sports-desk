@@ -9,7 +9,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - name: Install Python
-        run: pip install requests
+        run: pip install requests feedparser
       - name: Run script
         run: python main.py
         env:

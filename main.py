@@ -22,14 +22,13 @@ def send_line(message: str) -> None:
     response.raise_for_status()
 
 
-def fetch_entries(feed_url: str, limit: int = 8) -> list[dict]:
+def fetch_entries(feed_url: str, limit: int = 12) -> list[dict]:
     feed = feedparser.parse(feed_url)
     items = []
 
     for entry in feed.entries[:limit]:
         title = entry.get("title", "").strip()
         summary = entry.get("summary", "").strip()
-        link = entry.get("link", "").strip()
 
         if not title:
             continue
@@ -37,7 +36,6 @@ def fetch_entries(feed_url: str, limit: int = 8) -> list[dict]:
         items.append({
             "title": title,
             "summary": summary,
-            "link": link,
         })
 
     return items
@@ -133,9 +131,8 @@ def score_f1(title: str, summary: str) -> tuple[int, str]:
     return score, note
 
 
-def pick_top_news(entries: list[dict], scorer, top_n: int = 2) -> list[dict]:
+def pick_top_news(entries: list[dict], scorer, top_n: int = 5) -> list[dict]:
     scored = []
-
     seen_titles = set()
 
     for entry in entries:
@@ -178,25 +175,23 @@ def build_section(title: str, items: list[dict]) -> str:
 
 
 def build_overview(arsenal: list[dict], spain: list[dict], f1: list[dict]) -> str:
-    weights = {
-        "Arsenal": sum(item["score"] for item in arsenal),
-        "Spain": sum(item["score"] for item in spain),
-        "Ferrari / Leclerc": sum(item["score"] for item in f1),
+    counts = {
+        "Arsenal": len(arsenal),
+        "Spain": len(spain),
+        "Ferrari / Leclerc": len(f1),
     }
 
-    active = [(k, v) for k, v in weights.items() if v > 0]
-    active.sort(key=lambda x: x[1], reverse=True)
+    sorted_topics = sorted(counts.items(), key=lambda x: x[1], reverse=True)
 
-    if not active:
+    if all(v == 0 for _, v in sorted_topics):
         return "👉 今日概況\n今天沒有抓到夠重要的明顯重點。"
 
-    if len(active) == 1:
-        return f"👉 今日概況\n今天的主要更新集中在 {active[0][0]}。"
+    top_topic = sorted_topics[0][0]
+    if len(sorted_topics) > 1 and sorted_topics[1][1] > 0:
+        second_topic = sorted_topics[1][0]
+        return f"👉 今日概況\n今天更新較多的是 {top_topic}，其次是 {second_topic}。"
 
-    if len(active) == 2:
-        return f"👉 今日概況\n今天較值得注意的是 {active[0][0]} 和 {active[1][0]}。"
-
-    return f"👉 今日概況\n今天最值得注意的是 {active[0][0]}，其次是 {active[1][0]}。"
+    return f"👉 今日概況\n今天的主要更新集中在 {top_topic}。"
 
 
 def main() -> None:
@@ -213,13 +208,13 @@ def main() -> None:
         "q=Charles+Leclerc+OR+Ferrari+F1&hl=en-US&gl=US&ceid=US:en"
     )
 
-    arsenal_entries = fetch_entries(arsenal_feed)
-    spain_entries = fetch_entries(spain_feed)
-    f1_entries = fetch_entries(f1_feed)
+    arsenal_entries = fetch_entries(arsenal_feed, limit=12)
+    spain_entries = fetch_entries(spain_feed, limit=12)
+    f1_entries = fetch_entries(f1_feed, limit=12)
 
-    arsenal_news = pick_top_news(arsenal_entries, score_arsenal, top_n=2)
-    spain_news = pick_top_news(spain_entries, score_spain, top_n=2)
-    f1_news = pick_top_news(f1_entries, score_f1, top_n=2)
+    arsenal_news = pick_top_news(arsenal_entries, score_arsenal, top_n=5)
+    spain_news = pick_top_news(spain_entries, score_spain, top_n=5)
+    f1_news = pick_top_news(f1_entries, score_f1, top_n=5)
 
     message_parts = [
         "📊 Dulce's Sports Desk｜今日運動快報",

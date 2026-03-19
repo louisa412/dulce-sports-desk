@@ -7,8 +7,8 @@ jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Install Python
+      - uses: actions/checkout@v4
+      - name: Install Python packages
         run: pip install requests feedparser
       - name: Run script
         run: python main.py

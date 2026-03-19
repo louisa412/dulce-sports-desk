@@ -1,4 +1,5 @@
 import os
+import json
 import requests
 import feedparser
 from openai import OpenAI
@@ -124,30 +125,102 @@ def score_f1(title: str, summary: str) -> int:
     return score
 
 
-def ai_note(topic: str, title: str, summary: str) -> str:
-    prompt = f"""
-你是體育新聞編輯。請根據以下資訊，用繁體中文寫一句 18~28 字的「這代表什麼」。
-要求：
-1. 只寫一句
-2. 不要重複標題
-3. 不要寫得太空泛
-4. 語氣像晨間快報編輯
-5. 不要加引號
+def pick_top_news(entries: list[dict], scorer, top_n: int = 5) -> list[dict]:
+    scored = []
+    seen_titles = set()
 
-主題：{topic}
-標題：{title}
-摘要：{summary}
+    for entry in entries:
+        title = entry["title"]
+
+        if title in seen_titles:
+            continue
+        seen_titles.add(title)
+
+        if looks_like_noise(title):
+            continue
+
+        score = scorer(entry["title"], entry["summary"])
+        if score <= 0:
+            continue
+
+        scored.append({
+            "title": entry["title"],
+            "summary": entry["summary"],
+            "score": score,
+            "source": entry["source"],
+            "link": entry["link"],
+        })
+
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    return scored[:top_n]
+
+
+def ai_notes_batch(topic: str, items: list[dict]) -> list[str]:
+    if not items:
+        return []
+
+    payload = []
+    for idx, item in enumerate(items, start=1):
+        payload.append({
+            "id": idx,
+            "title": item["title"],
+            "summary": item["summary"],
+        })
+
+    prompt = f"""
+你是體育晨間快報編輯。請根據以下 {topic} 新聞，為每一則寫一句繁體中文的「這代表什麼」。
+
+要求：
+1. 每則只寫一句
+2. 18~28 字左右
+3. 不要重複標題
+4. 不要太空泛
+5. 語氣像晨間快報編輯
+6. 請輸出純 JSON 陣列，格式如下：
+[
+  {{"id": 1, "note": "......"}},
+  {{"id": 2, "note": "......"}}
+]
+
+新聞資料：
+{json.dumps(payload, ensure_ascii=False)}
 """
+
     try:
         response = client.responses.create(
             model="gpt-4.1-mini",
             input=prompt,
-            max_output_tokens=60,
+            max_output_tokens=300,
         )
         text = response.output_text.strip()
-        return text if text else "代表近期動向值得留意"
+
+        result = json.loads(text)
+        note_map = {
+            int(item["id"]): item["note"].strip()
+            for item in result
+            if "id" in item and "note" in item
+        }
+
+        notes = []
+        for idx in range(1, len(items) + 1):
+            notes.append(note_map.get(idx, "代表近期動向值得留意"))
+        return notes
+
     except Exception:
-        return "代表近期動向值得留意"
+        return ["代表近期動向值得留意"] * len(items)
+
+
+def add_ai_notes_batch(topic: str, items: list[dict]) -> list[dict]:
+    notes = ai_notes_batch(topic, items)
+    enriched = []
+
+    for item, note in zip(items, notes):
+        enriched.append({
+            **item,
+            "note": note,
+        })
+
+    return enriched
 
 
 def ai_overview(arsenal: list[dict], spain: list[dict], f1: list[dict]) -> str:
@@ -159,8 +232,9 @@ def ai_overview(arsenal: list[dict], spain: list[dict], f1: list[dict]) -> str:
     prompt = f"""
 你是晨間運動快報編輯。請根據以下三區最重要新聞，
 用繁體中文寫 2 句內的今日精選摘要。
+
 要求：
-1. 精煉
+1. 精煉自然
 2. 像人在整理重點
 3. 不要條列
 4. 不超過 60 字
@@ -179,38 +253,6 @@ def ai_overview(arsenal: list[dict], spain: list[dict], f1: list[dict]) -> str:
         return text if text else "今天的重點集中在最上方三則精選新聞。"
     except Exception:
         return "今天的重點集中在最上方三則精選新聞。"
-
-
-def pick_top_news(entries: list[dict], topic: str, scorer, top_n: int = 5) -> list[dict]:
-    scored = []
-    seen_titles = set()
-
-    for entry in entries:
-        title = entry["title"]
-
-        if title in seen_titles:
-            continue
-        seen_titles.add(title)
-
-        if looks_like_noise(title):
-            continue
-
-        score = scorer(entry["title"], entry["summary"])
-        if score <= 0:
-            continue
-
-        note = ai_note(topic, entry["title"], entry["summary"])
-
-        scored.append({
-            "title": entry["title"],
-            "score": score,
-            "note": note,
-            "source": entry["source"],
-            "link": entry["link"],
-        })
-
-    scored.sort(key=lambda x: x["score"], reverse=True)
-    return scored[:top_n]
 
 
 def build_section(title: str, items: list[dict]) -> str:
@@ -266,9 +308,14 @@ def main() -> None:
     spain_entries = fetch_entries(spain_feed, limit=12)
     f1_entries = fetch_entries(f1_feed, limit=12)
 
-    arsenal_news = pick_top_news(arsenal_entries, "Arsenal", score_arsenal, top_n=5)
-    spain_news = pick_top_news(spain_entries, "Spain", score_spain, top_n=5)
-    f1_news = pick_top_news(f1_entries, "Leclerc / F1", score_f1, top_n=5)
+    arsenal_news = pick_top_news(arsenal_entries, score_arsenal, top_n=5)
+    spain_news = pick_top_news(spain_entries, score_spain, top_n=5)
+    f1_news = pick_top_news(f1_entries, score_f1, top_n=5)
+
+    # 每區只 call 一次 AI
+    arsenal_news = add_ai_notes_batch("Arsenal", arsenal_news)
+    spain_news = add_ai_notes_batch("Spain", spain_news)
+    f1_news = add_ai_notes_batch("Leclerc / F1", f1_news)
 
     message_parts = [
         "📊 Dulce's Sports Desk｜今日運動快報",

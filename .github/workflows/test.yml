@@ -10,8 +10,8 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v5
-      - name: Install Python packages
-        run: pip install requests feedparser
+　　　 - name: Install Python packages
+        run: pip install requests feedparser openai
       - name: Run script
         run: python main.py
         env:

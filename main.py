@@ -1,341 +1,93 @@
-import os
-import json
+import sys
 import requests
-import feedparser
-from openai import OpenAI
+import json
+import os
+from config import LINE_TOKEN, TEST_USER_ID, USER_ID
+from services.news_fetcher import fetch_entries, pick_top_news, score_arsenal, score_spain, score_f1
+from services.ai_engine import generate_all_content
+from utils.line_renderer import build_flex_messages
 
-
-LINE_TOKEN = os.getenv("LINE_TOKEN")
-USER_ID = os.getenv("USER_ID")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-client = OpenAI(api_key=OPENAI_API_KEY)
-
-
-def send_line(message: str) -> None:
-    url = "https://api.line.me/v2/bot/message/push"
+def send_to_line(messages, is_test=True):
+    # 設定目標網址：測試模式用 push，正式廣播用 broadcast
+    url = "https://api.line.me/v2/bot/message/push" if is_test else "https://api.line.me/v2/bot/message/broadcast"
+    
     headers = {
-        "Authorization": f"Bearer {LINE_TOKEN}",
-        "Content-Type": "application/json",
+        "Authorization": f"Bearer {LINE_TOKEN}", 
+        "Content-Type": "application/json"
     }
-    data = {
-        "to": USER_ID,
-        "messages": [{"type": "text", "text": message}],
-    }
-
-    response = requests.post(url, headers=headers, json=data, timeout=30)
-    response.raise_for_status()
-
-
-def split_title_and_source(raw_title: str) -> tuple[str, str]:
-    parts = raw_title.rsplit(" - ", 1)
-    if len(parts) == 2:
-        title, source = parts[0].strip(), parts[1].strip()
-        return title, source
-    return raw_title.strip(), "未知來源"
-
-
-def fetch_entries(feed_url: str, limit: int = 12) -> list[dict]:
-    feed = feedparser.parse(feed_url)
-    items = []
-
-    for entry in feed.entries[:limit]:
-        raw_title = entry.get("title", "").strip()
-        summary = entry.get("summary", "").strip()
-        link = entry.get("link", "").strip()
-
-        if not raw_title:
-            continue
-
-        title, source = split_title_and_source(raw_title)
-
-        items.append({
-            "title": title,
-            "summary": summary,
-            "source": source,
-            "link": link,
-        })
-
-    return items
-
-
-def looks_like_noise(title: str) -> bool:
-    noise_keywords = [
-        "live",
-        "watch",
-        "stream",
-        "tv channel",
-        "how to watch",
-        "odds",
-        "betting",
-        "prediction",
-        "highlights",
-        "player ratings",
-        "quiz",
-    ]
-    lower_title = title.lower()
-    return any(keyword in lower_title for keyword in noise_keywords)
-
-
-def score_arsenal(title: str, summary: str) -> int:
-    text = f"{title} {summary}".lower()
-    score = 0
-
-    if any(k in text for k in ["injury", "injured", "fitness", "return", "recovery", "out for"]):
-        score += 4
-    if any(k in text for k in ["transfer", "sign", "bid", "deal", "target"]):
-        score += 3
-    if any(k in text for k in ["arteta", "press conference", "rotation", "lineup", "starting xi"]):
-        score += 2
-    if any(k in text for k in ["champions league", "premier league", "title race"]):
-        score += 2
-
-    return score
-
-
-def score_spain(title: str, summary: str) -> int:
-    text = f"{title} {summary}".lower()
-    score = 0
-
-    if any(k in text for k in ["squad", "call-up", "called up", "selected", "selection"]):
-        score += 4
-    if any(k in text for k in ["injury", "injured", "withdraw", "ruled out"]):
-        score += 4
-    if any(k in text for k in ["coach", "manager", "tactics", "formation"]):
-        score += 2
-    if any(k in text for k in ["qualifier", "nations league", "world cup", "euro"]):
-        score += 2
-
-    return score
-
-
-def score_f1(title: str, summary: str) -> int:
-    text = f"{title} {summary}".lower()
-    score = 0
-
-    if any(k in text for k in ["ferrari", "leclerc", "charles leclerc"]):
-        score += 2
-    if any(k in text for k in ["qualifying", "grid", "pole", "practice", "race"]):
-        score += 3
-    if any(k in text for k in ["setup", "pace", "upgrade", "strategy", "tyre", "tire"]):
-        score += 3
-    if any(k in text for k in ["penalty", "crash", "incident", "dnf"]):
-        score += 4
-
-    return score
-
-
-def pick_top_news(entries: list[dict], scorer, top_n: int = 5) -> list[dict]:
-    scored = []
-    seen_titles = set()
-
-    for entry in entries:
-        title = entry["title"]
-
-        if title in seen_titles:
-            continue
-        seen_titles.add(title)
-
-        if looks_like_noise(title):
-            continue
-
-        score = scorer(entry["title"], entry["summary"])
-        if score <= 0:
-            continue
-
-        scored.append({
-            "title": entry["title"],
-            "summary": entry["summary"],
-            "score": score,
-            "source": entry["source"],
-            "link": entry["link"],
-        })
-
-    scored.sort(key=lambda x: x["score"], reverse=True)
-    return scored[:top_n]
-
-
-def ai_notes_batch(topic: str, items: list[dict]) -> list[str]:
-    if not items:
-        return []
-
-    payload = []
-    for idx, item in enumerate(items, start=1):
-        payload.append({
-            "id": idx,
-            "title": item["title"],
-            "summary": item["summary"],
-        })
-
-    prompt = f"""
-你是體育晨間快報編輯。請根據以下 {topic} 新聞，為每一則寫一句繁體中文的「這代表什麼」。
-
-要求：
-1. 每則只寫一句
-2. 18~28 字左右
-3. 不要重複標題
-4. 不要太空泛
-5. 語氣像晨間快報編輯
-6. 請輸出純 JSON 陣列，格式如下：
-[
-  {{"id": 1, "note": "......"}},
-  {{"id": 2, "note": "......"}}
-]
-
-新聞資料：
-{json.dumps(payload, ensure_ascii=False)}
-"""
+    
+    # 建立 Payload
+    payload = {"messages": messages}
+    
+    # 如果是測試模式才需要指定收件 ID
+    if is_test:
+        payload["to"] = TEST_USER_ID
+        print(f"📡 正在發送【測試推播】到 ID: {TEST_USER_ID[:6]}...")
+    else:
+        print("🚀 正在啟動【正式全體廣播】...")
 
     try:
-        response = client.responses.create(
-            model="gpt-4.1-mini",
-            input=prompt,
-            max_output_tokens=300,
-        )
-        text = response.output_text.strip()
+        r = requests.post(url, headers=headers, json=payload, timeout=30)
+        if r.status_code == 200:
+            mode = "測試" if is_test else "廣播"
+            print(f"✨ LINE {mode} 成功！")
+        else:
+            print(f"🚩 LINE API 報錯: {r.status_code} - {r.text}")
+    except Exception as e:
+        print(f"❌ 網路連線異常: {e}")
 
-        result = json.loads(text)
-        note_map = {
-            int(item["id"]): item["note"].strip()
-            for item in result
-            if "id" in item and "note" in item
-        }
+def main():
+    if not LINE_TOKEN:
+        print("❌ 錯誤：找不到 LINE_TOKEN，請檢查 .env 或 config.py")
+        return
 
-        notes = []
-        for idx in range(1, len(items) + 1):
-            notes.append(note_map.get(idx, "代表近期動向值得留意"))
-        return notes
+    # 1. 判斷模式
+    is_test = len(sys.argv) > 1 and sys.argv[1] == "test"
+    print(f"--- 啟動模式：{'測試模式' if is_test else '正式廣播'} ---")
 
-    except Exception:
-        return ["代表近期動向值得留意"] * len(items)
+    # 2. 抓取各分類新聞 (Spain 網址已修正空格問題)
+    print("📡 正在從 Google News 抓取戰報...")
+    arsenal = pick_top_news(fetch_entries("https://news.google.com/rss/search?q=Arsenal&hl=en-US"), score_arsenal)
+    spain = pick_top_news(fetch_entries("https://news.google.com/rss/search?q=Spain+national+team+football&hl=en-US"), score_spain)
+    f1 = pick_top_news(fetch_entries("https://news.google.com/rss/search?q=Charles+Leclerc+OR+Ferrari+F1&hl=en-US"), score_f1)
 
+    # 3. 準備資料包，合併呼叫 Gemini
+    # 注意：這裡的 Key 名稱必須與 ai_engine.py 裡的一致
+    categories_data = {
+        "Arsenal": arsenal,
+        "Spain": spain,
+        "Leclerc / F1": f1
+    }
 
-def add_ai_notes_batch(topic: str, items: list[dict]) -> list[dict]:
-    notes = ai_notes_batch(topic, items)
-    enriched = []
+    print("🧠 正在一次性生成所有 AI 深度戰報（節省 API 額度模式）...")
+    all_notes, ov_text = generate_all_content(categories_data)
 
-    for item, note in zip(items, notes):
-        enriched.append({
-            **item,
-            "note": note,
-        })
+    # 將生成出來的摘要填回對應的新聞物件中
+    if all_notes:
+        # 填入 Arsenal 摘要
+        if "Arsenal" in all_notes:
+            for it, n in zip(arsenal, all_notes["Arsenal"]): it["note"] = n
+        
+        # 填入 Spain 摘要
+        if "Spain" in all_notes:
+            for it, n in zip(spain, all_notes["Spain"]): it["note"] = n
+            
+        # 填入 F1 摘要
+        if "Leclerc / F1" in all_notes:
+            for it, n in zip(f1, all_notes["Leclerc / F1"]): it["note"] = n
+    else:
+        print("⚠️ AI 生成內容為空，將使用預設摘要。")
 
-    return enriched
+    # 4. 構建並發送 LINE 訊息
+    print("🎨 正在構建 Flex Message 介面...")
+    msgs = build_flex_messages(arsenal, spain, f1, ov_text)
+    
+    if msgs:
+        send_to_line(msgs, is_test)
+    else:
+        print("⚠️ 無內容可發送，請檢查新聞抓取邏輯。")
 
-
-def ai_overview(arsenal: list[dict], spain: list[dict], f1: list[dict]) -> str:
-    def top_line(label: str, items: list[dict]) -> str:
-        if not items:
-            return f"{label}：今日無明顯重點"
-        return f"{label}：{items[0]['title']}"
-
-    prompt = f"""
-你是晨間運動快報編輯。請根據以下三區最重要新聞，
-用繁體中文寫 2 句內的今日精選摘要。
-
-要求：
-1. 精煉自然
-2. 像人在整理重點
-3. 不要條列
-4. 不超過 60 字
-
-{top_line("Arsenal", arsenal)}
-{top_line("Spain", spain)}
-{top_line("Leclerc / F1", f1)}
-"""
-    try:
-        response = client.responses.create(
-            model="gpt-4.1-mini",
-            input=prompt,
-            max_output_tokens=80,
-        )
-        text = response.output_text.strip()
-        return text if text else "今天的重點集中在最上方三則精選新聞。"
-    except Exception:
-        return "今天的重點集中在最上方三則精選新聞。"
-
-
-def build_section(title: str, items: list[dict]) -> str:
-    lines = [title]
-
-    if not items:
-        lines.append("- 今日暫無明顯重點")
-        return "\n".join(lines)
-
-    for item in items:
-        lines.append(f"- {item['title']}")
-        lines.append(f"  → {item['note']}｜{item['source']}")
-
-    return "\n".join(lines)
-
-
-def build_overview(arsenal: list[dict], spain: list[dict], f1: list[dict]) -> str:
-    lines = ["👉 今日精選摘要"]
-    lines.append(ai_overview(arsenal, spain, f1))
-    lines.append("")
-
-    if arsenal:
-        lines.append(f"⚽ Arsenal：{arsenal[0]['title']}")
-        lines.append(f"連結：{arsenal[0]['link']}")
-    if spain:
-        lines.append(f"🇪🇸 Spain：{spain[0]['title']}")
-        lines.append(f"連結：{spain[0]['link']}")
-    if f1:
-        lines.append(f"🏎️ Leclerc / F1：{f1[0]['title']}")
-        lines.append(f"連結：{f1[0]['link']}")
-
-    if not arsenal and not spain and not f1:
-        lines.append("今天沒有抓到夠重要的明顯重點。")
-
-    return "\n".join(lines)
-
-
-def main() -> None:
-    arsenal_feed = (
-        "https://news.google.com/rss/search?"
-        "q=Arsenal&hl=en-US&gl=US&ceid=US:en"
-    )
-    spain_feed = (
-        "https://news.google.com/rss/search?"
-        "q=Spain+national+team+football&hl=en-US&gl=US&ceid=US:en"
-    )
-    f1_feed = (
-        "https://news.google.com/rss/search?"
-        "q=Charles+Leclerc+OR+Ferrari+F1&hl=en-US&gl=US&ceid=US:en"
-    )
-
-    arsenal_entries = fetch_entries(arsenal_feed, limit=12)
-    spain_entries = fetch_entries(spain_feed, limit=12)
-    f1_entries = fetch_entries(f1_feed, limit=12)
-
-    arsenal_news = pick_top_news(arsenal_entries, score_arsenal, top_n=5)
-    spain_news = pick_top_news(spain_entries, score_spain, top_n=5)
-    f1_news = pick_top_news(f1_entries, score_f1, top_n=5)
-
-    # 每區只 call 一次 AI
-    arsenal_news = add_ai_notes_batch("Arsenal", arsenal_news)
-    spain_news = add_ai_notes_batch("Spain", spain_news)
-    f1_news = add_ai_notes_batch("Leclerc / F1", f1_news)
-
-    message_parts = [
-        "📊 Dulce's Sports Desk｜今日運動快報",
-        "",
-        build_section("⚽ Arsenal", arsenal_news),
-        "",
-        build_section("🇪🇸 Spain", spain_news),
-        "",
-        build_section("🏎️ Leclerc / F1", f1_news),
-        "",
-        build_overview(arsenal_news, spain_news, f1_news),
-    ]
-
-    message = "\n".join(message_parts)
-
-    if len(message) > 4500:
-        message = message[:4400] + "\n...\n（內容過長，已截斷）"
-
-    send_line(message)
-
+    print("✅ 任務執行完畢。")
 
 if __name__ == "__main__":
     main()

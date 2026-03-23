@@ -1,0 +1,28 @@
+import os
+from dotenv import load_dotenv
+
+# 這行會自動去抓同資料夾下的 .env 檔案
+load_dotenv()
+
+LINE_TOKEN = os.getenv("LINE_TOKEN")
+TEST_USER_ID = os.getenv("TEST_USER_ID")
+USER_ID = os.getenv("USER_ID")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# 調整後的長度限制
+SUMMARY_MAX_LENGTH = 150
+OVERVIEW_SUMMARY_MAX_LENGTH = 100
+OVERVIEW_TEXT_MAX_LENGTH = 80
+
+# 原始計分與時間邏輯
+RECENT_HOURS = 24
+BACKFILL_HOURS = 48
+CATEGORY_NEWS_COUNT = 4
+OVERVIEW_COUNT = 3
+
+# 顏色與介面設定
+SECTION_TITLE_COLOR = "#0F172A"
+SECTION_ACCENT_COLOR = "#D32F2F"
+OVERVIEW_ACCENT_COLOR = "#7C3AED"
+FLEX_MESSAGE_SIZE_LIMIT = 11000
+SUMMARY_FALLBACK_TEXT = "點擊閱讀全文"

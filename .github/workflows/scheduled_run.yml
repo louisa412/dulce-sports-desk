@@ -5,6 +5,15 @@ on:
     # 台北時間 08:00 (UTC 00:00)
     - cron: "0 0 * * *"
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "執行模式：test=測試推播, broadcast=正式廣播"
+        required: true
+        default: test
+        type: choice
+        options:
+          - test
+          - broadcast
 
 jobs:
   run-sports-bot:
@@ -16,7 +25,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install Dependencies
         run: |
@@ -30,5 +39,14 @@ jobs:
           # 可在 GitHub Secrets 新增 GEMINI_MODEL 覆寫；預設用 gemini-2.5-flash-lite
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-2.5-flash-lite' }}
           TEST_USER_ID: ${{ secrets.TEST_USER_ID }}
-        # 注意：下面這一行必須縮排，且跟 env 對齊
-        run: python main.py test
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "Scheduled run -> broadcast mode"
+            python main.py
+          elif [ "${{ github.event.inputs.mode }}" = "broadcast" ]; then
+            echo "Manual run -> broadcast mode"
+            python main.py
+          else
+            echo "Manual run -> test mode"
+            python main.py test
+          fi

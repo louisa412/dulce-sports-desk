@@ -13,7 +13,9 @@ def get_client():
     
     # 初始化新版 GenAI Client
     return genai.Client(api_key=key)
-
+for m in client.models.list():
+    print(f"可用模型: {m.name}")
+    
 def generate_all_content(categories_data):
     client = get_client()
     if not client: return {}, "❌ API Key 未設定。"
@@ -44,7 +46,7 @@ def generate_all_content(categories_data):
         # 使用新版 SDK 語法
         # 注意：model 參數直接傳入模型字串
         response = client.models.generate_content(
-            model='gemini-1.5-flash',
+            model='gemini-2.0-flash',
             contents=prompt,
             config={
                 'response_mime_type': 'application/json',

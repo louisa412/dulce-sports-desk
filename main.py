@@ -37,7 +37,7 @@ def send_to_line(messages, is_test=True):
             print("❌ 錯誤：測試模式缺少 TEST_USER_ID，已取消發送。")
             return False
         payload["to"] = TEST_USER_ID
-        print(f"📡 正在發送​:codex-terminal-citation[codex-terminal-citation]{line_range_start=37 line_range_end=41 terminal_chunk_id=測試推播】到 ID: {TEST_USER_ID[:6]}...")
+        print(f"📡 正在發送【測試推播】到 ID: {TEST_USER_ID[:6]}...")
     else:
         print("🚀 正在啟動【正式全體廣播】...")
 

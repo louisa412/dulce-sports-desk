@@ -56,7 +56,7 @@ def generate_all_content(categories_data):
         ]
 
     prompt = """
-    你是專業運動新聞主編。請針對以下各分類的新聞，分別撰寫約 120 字的【繁體中文】深度摘要。
+    你是專業運動新聞主編。請針對以下各分類的新聞，分別撰寫約 120 字的​:codex-terminal-citation[codex-terminal-citation]{line_range_start=1 line_range_end=147 terminal_chunk_id=繁體中文】深度摘要。
 
     要求：
     1. 每個摘要都必須是【繁體中文】，內容專業且引人入勝。不可只是重述標題。
@@ -76,7 +76,8 @@ def generate_all_content(categories_data):
     target_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
 
     gen_config = types.GenerateContentConfig(
-        response_mime_type="application/json",
+        # 先移除 response_mime_type，避免部分端點將其序列化為
+        # responseMimeType 後在 generation_config 觸發 400 INVALID_ARGUMENT。
         temperature=0.7,
     )
 

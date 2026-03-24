@@ -1,34 +1,23 @@
-import google.generativeai as genai
+from google import genai
 import json
 import os
 import re
 from config import GEMINI_API_KEY
 
-def get_model():
-    # 優先從環境變數抓取，GitHub Actions 執行時會用到
+def get_client():
+    # 優先從環境變數抓取
     key = os.getenv("GEMINI_API_KEY") or GEMINI_API_KEY
     if not key: 
         print("❌ 錯誤：找不到 GEMINI_API_KEY")
         return None
     
-    # 設定 API Key
-    genai.configure(api_key=key)
-    
-    # 初始化穩定版模型
-    model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash",
-        generation_config={
-            "response_mime_type": "application/json",
-            "temperature": 0.7
-        }
-    )
-    return model
+    # 初始化新版 GenAI Client
+    return genai.Client(api_key=key)
 
 def generate_all_content(categories_data):
-    model = get_model()
-    if not model: return {}, "❌ API Key 未設定或初始化失敗。"
+    client = get_client()
+    if not client: return {}, "❌ API Key 未設定。"
 
-    # 檢查是否有資料
     if not any(categories_data.values()): 
         return {}, "今日暫無新的運動新聞動態。"
     
@@ -44,9 +33,7 @@ def generate_all_content(categories_data):
     2. 最後寫一段 100 字內的【繁體中文】今日精華導讀（overview）。
     3. 必須回傳純 JSON 格式，格式如下：
     {{
-      "summaries": {{ 
-          "分類名稱": [ {{"id": 1, "note": "..."}} ]
-      }},
+      "summaries": {{ "分類名": [ {{"id": 1, "note": "..."}} ] }},
       "overview": "..."
     }}
     
@@ -54,8 +41,16 @@ def generate_all_content(categories_data):
     """
 
     try:
-        # 使用穩定版 SDK 的生成方式
-        response = model.generate_content(prompt)
+        # 使用新版 SDK 語法
+        # 注意：model 參數直接傳入模型字串
+        response = client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=prompt,
+            config={
+                'response_mime_type': 'application/json',
+                'temperature': 0.7
+            }
+        )
         
         if not response or not response.text:
             raise ValueError("AI 回傳內容為空")
@@ -69,14 +64,12 @@ def generate_all_content(categories_data):
         all_notes = {}
         for cat, items in categories_data.items():
             cat_notes = res_data.get("summaries", {}).get(cat, [])
-            # 建立 ID 到 note 的映射
             note_dict = {str(d['id']): d['note'] for d in cat_notes if 'id' in d and 'note' in d}
-            # 依照原始順序填入
             all_notes[cat] = [note_dict.get(str(i+1), "分析完成，請見詳情。") for i in range(len(items))]
             
         return all_notes, res_data.get("overview", "今日體育重點導讀已生成。")
 
     except Exception as e:
         print(f"❌ AI 生成失敗詳細原因: {str(e)}")
-        # 即使失敗也回傳空資料，讓 main.py 至少能用原始摘要發送
-        return {}, f"今日焦點導讀（暫由系統自動生成）：{type(e).__name__}"
+        # 即使失敗也讓程式繼續運行
+        return {}, f"今日焦點導讀（自動生成中）：{str(e)}"

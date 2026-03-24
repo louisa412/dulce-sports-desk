@@ -45,30 +45,31 @@ def generate_all_content(categories_data):
             for i, it in enumerate(items)
         ]
 
-    prompt = f"""
-    你是專業運動新聞主編。請針對以下各分類的新聞，分別撰寫約 120 字的​:codex-terminal-citation[codex-terminal-citation]{line_range_start=1 line_range_end=4 terminal_chunk_id=繁體中文】深度摘要。
+    prompt = """
+    你是專業運動新聞主編。請針對以下各分類的新聞，分別撰寫約 120 字的【繁體中文】深度摘要。
 
     要求：
     1. 每個摘要都必須是【繁體中文】，內容專業且引人入勝。不可只是重述標題。
     2. 最後寫一段 100 字內的【繁體中文】今日精華導讀（overview）。
     3. 必須回傳純 JSON 格式，不得包含任何 Markdown 以外的解釋文字，格式如下：
-    {{
-      "summaries": {{ "分類名": [ {{"id": 1, "note": "..."}} ] }},
+    {
+      "summaries": { "分類名": [ {"id": 1, "note": "..."} ] },
       "overview": "..."
-    }}
+    }
 
-    資料來源：{json.dumps(combined_payload, ensure_ascii=False)}
+    資料來源：
     """
+    prompt = prompt + json.dumps(combined_payload, ensure_ascii=False)
 
     # --- 重試機制設定 ---
     max_retries = 3
     retry_delay = 5  # 每次失敗後等待的秒數
-    # 低成本且適合摘要生成的 Flash 模型
-    target_model = "gemini-2.5-flash"
+    # 優先使用低成本 Flash Lite；可由環境變數 GEMINI_MODEL 覆寫
+    target_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
 
     for attempt in range(max_retries):
         try:
-            print(f"📡 正在嘗試 AI 生成 (第 {attempt + 1}/{max_retries} 次)...")
+            print(f"📡 正在嘗試 AI 生成 (第 {attempt + 1}/{max_retries} 次)，模型：{target_model}...")
 
             response = client.models.generate_content(
                 model=target_model,

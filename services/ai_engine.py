@@ -75,8 +75,9 @@ def generate_all_content(categories_data):
                 model=target_model,
                 contents=prompt,
                 config={
-                    "response_mime_type": "application/json",
-                    "temperature": 0.7,
+                    "responseMimeType": "application/json",
+                    "temperature": 0.7
+                }
                 },
             )
 

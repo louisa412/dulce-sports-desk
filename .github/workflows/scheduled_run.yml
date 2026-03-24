@@ -4,7 +4,7 @@ on:
   schedule:
     # 台北時間 08:00 (UTC 00:00)
     - cron: "0 0 * * *"
-  workflow_dispatch: # 讓你可以隨時在網頁點按鈕手動執行
+  workflow_dispatch:
 
 jobs:
   run-sports-bot:
@@ -28,5 +28,5 @@ jobs:
           LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TEST_USER_ID: ${{ secrets.TEST_USER_ID }}
-        # 執行測試模式
-      run: python main.py test
+        # 注意：下面這一行必須縮排，且跟 env 對齊
+        run: python main.py test

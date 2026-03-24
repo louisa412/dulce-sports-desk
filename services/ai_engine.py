@@ -13,8 +13,6 @@ def get_client():
     
     # 初始化新版 GenAI Client
     return genai.Client(api_key=key)
-for m in client.models.list():
-    print(f"可用模型: {m.name}")
     
 def generate_all_content(categories_data):
     client = get_client()

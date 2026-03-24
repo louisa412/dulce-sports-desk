@@ -27,8 +27,8 @@ jobs:
         env:
           LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          # 可在 GitHub Secrets 新增 GEMINI_MODEL 覆寫；預設用 gemini-2.0-flash
-          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-2.0-flash' }}
+          # 可在 GitHub Secrets 新增 GEMINI_MODEL 覆寫；預設用 gemini-2.5-flash-lite
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-2.5-flash-lite' }}
           TEST_USER_ID: ${{ secrets.TEST_USER_ID }}
         # 注意：下面這一行必須縮排，且跟 env 對齊
         run: python main.py test

@@ -36,9 +36,9 @@ def generate_all_content(categories_data):
     """
 
     try:
-        # 改用 Lite 型號避開目前的 429 封鎖
+
         response = client.models.generate_content(
-            model="gemini-2.0-flash-lite",
+            model="gemini-1.5-flash",
             contents=prompt,
             config={'response_mime_type': 'application/json'}
         )

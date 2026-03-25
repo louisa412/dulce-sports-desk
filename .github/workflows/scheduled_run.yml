@@ -2,7 +2,7 @@ name: Dulce Sports Desk Daily Push
 
 on:
   schedule:
-    # 台北時間 08:00 (UTC 00:00)
+    # 台北時間 08:00 (Asia/Taipei = UTC+8 -> UTC 00:00)
     - cron: "0 0 * * *"
   workflow_dispatch:
     inputs:
@@ -31,6 +31,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Debug Trigger Context
+        run: |
+          echo "event_name=${{ github.event_name }}"
+          echo "schedule_expr=${{ github.event.schedule }}"
+          echo "run_id=${{ github.run_id }}"
+          echo "triggered_utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          echo "triggered_taipei=$(TZ=Asia/Taipei date '+%Y-%m-%dT%H:%M:%S%z')"
 
       - name: Run Main Script
         env:

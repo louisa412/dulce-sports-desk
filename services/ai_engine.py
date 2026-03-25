@@ -4,6 +4,7 @@ import json
 import os
 import re
 import time
+from typing import Any
 from config import GEMINI_API_KEY
 
 
@@ -39,6 +40,46 @@ def _extract_json_text(raw_text):
     return match.group(0).strip() if match else cleaned
 
 
+def _build_note_mapping(cat_notes: list[Any], expected_count: int, category: str):
+    """建立摘要對照並記錄 fallback 原因。"""
+    note_by_id = {}
+    fallback_reasons = {}
+
+    for idx, row in enumerate(cat_notes, 1):
+        if not isinstance(row, dict):
+            print(f"⚠️ [{category}] 第 {idx} 筆不是 dict，跳過。內容={row}")
+            continue
+
+        raw_id = row.get("id")
+        note_text = str(row.get("note", "")).strip()
+        if raw_id is None:
+            print(f"⚠️ [{category}] 缺少 id，跳過。內容={row}")
+            continue
+
+        normalized_id = str(raw_id).strip()
+        if normalized_id.isdigit():
+            normalized_id = str(int(normalized_id))
+
+        if not note_text:
+            fallback_reasons[normalized_id] = "note 為空字串"
+            continue
+
+        note_by_id[normalized_id] = note_text
+
+    resolved_notes = []
+    for nid in range(1, expected_count + 1):
+        key = str(nid)
+        note = note_by_id.get(key)
+        if note:
+            resolved_notes.append(note)
+        else:
+            reason = fallback_reasons.get(key, "AI 未回傳此 id")
+            print(f"⚠️ [{category}] id={key} 觸發 fallback：{reason}")
+            resolved_notes.append("分析完成，請見詳情。")
+
+    return resolved_notes
+
+
 def generate_all_content(categories_data):
     """使用 AI 一次性生成所有分類的新聞深度摘要與今日導讀。"""
     client = get_client()
@@ -56,14 +97,20 @@ def generate_all_content(categories_data):
         ]
 
     prompt = """
-    你是專業運動新聞主編。請針對以下各分類的新聞，分別撰寫約 120 字的​:codex-terminal-citation[codex-terminal-citation]{line_range_start=1 line_range_end=147 terminal_chunk_id=繁體中文】深度摘要。
+    你是專業運動新聞主編。請針對以下每一則新聞，逐則撰寫約 120 字​:codex-terminal-citation[codex-terminal-citation]{line_range_start=1 line_range_end=190 terminal_chunk_id=繁體中文】深度摘要。
 
     要求：
-    1. 每個摘要都必須是【繁體中文】，內容專業且引人入勝。不可只是重述標題。
-    2. 最後寫一段 100 字內的【繁體中文】今日精華導讀（overview）。
-    3. 必須回傳純 JSON 格式，不得包含任何 Markdown 以外的解釋文字，格式如下：
+    1. 每個分類中的每一則新聞都必須輸出一筆摘要，id 必須與輸入資料 id 完全一致。
+    2. 每個摘要都必須是【繁體中文】，內容專業且引人入勝，不可只是重述標題。
+    3. 最後寫一段 100 字內的【繁體中文】今日精華導讀（overview）。
+    4. 必須回傳純 JSON 格式，不得包含 Markdown 或其他解釋文字，格式如下：
     {
-      "summaries": { "分類名": [ {"id": 1, "note": "..."} ] },
+      "summaries": {
+        "分類名": [
+          {"id": 1, "note": "..."},
+          {"id": 2, "note": "..."}
+        ]
+      },
       "overview": "..."
     }
 
@@ -95,21 +142,17 @@ def generate_all_content(categories_data):
             if not raw_text:
                 raise ValueError("AI 回傳內容為空")
 
+            print("🧾 Gemini 原始 response.text：")
+            print(raw_text)
+
             clean_json = _extract_json_text(raw_text)
             res_data = json.loads(clean_json)
 
             all_notes = {}
             for cat, items in categories_data.items():
                 cat_notes = res_data.get("summaries", {}).get(cat, [])
-                note_dict = {
-                    str(d.get("id")): d.get("note", "").strip()
-                    for d in cat_notes
-                    if isinstance(d, dict) and d.get("id") is not None
-                }
-                all_notes[cat] = [
-                    note_dict.get(str(i + 1), "分析完成，請見詳情。")
-                    for i in range(len(items))
-                ]
+                print(f"📦 [{cat}] 解析到 {len(cat_notes)} 筆摘要，預期 {len(items)} 筆。")
+                all_notes[cat] = _build_note_mapping(cat_notes, len(items), cat)
 
             overview = res_data.get("overview", "").strip() if isinstance(res_data, dict) else ""
             if not overview:

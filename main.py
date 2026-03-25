@@ -1,4 +1,7 @@
+import os
 import sys
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 import requests
 from config import LINE_TOKEN, TEST_USER_ID
 from services.news_fetcher import (
@@ -37,7 +40,7 @@ def send_to_line(messages, is_test=True):
             print("❌ 錯誤：測試模式缺少 TEST_USER_ID，已取消發送。")
             return False
         payload["to"] = TEST_USER_ID
-        print(f"📡 正在發送【測試推播】到 ID: {TEST_USER_ID[:6]}...")
+        print(f"📡 正在發送​:codex-terminal-citation[codex-terminal-citation]{line_range_start=1 line_range_end=159 terminal_chunk_id=測試推播】到 ID: {TEST_USER_ID[:6]}...")
     else:
         print("🚀 正在啟動【正式全體廣播】...")
 
@@ -55,6 +58,32 @@ def send_to_line(messages, is_test=True):
         return False
 
 
+def log_runtime_context():
+    event_name = os.getenv("GITHUB_EVENT_NAME", "local")
+    now_utc = datetime.now(timezone.utc)
+    now_taipei = now_utc.astimezone(ZoneInfo("Asia/Taipei"))
+    print(f"🧭 執行模式(event_name)：{event_name}")
+    print(f"🕒 觸發時間 UTC：{now_utc.isoformat()}")
+    print(f"🕒 觸發時間 Asia/Taipei：{now_taipei.isoformat()}")
+
+
+def log_category_summary_mapping(category_name, items):
+    success_count = 0
+    for idx, item in enumerate(items, 1):
+        note = item.get("note", "")
+        is_fallback = note == "分析完成，請見詳情。"
+        if note and not is_fallback:
+            success_count += 1
+        print(
+            f"📰 [{category_name}] #{idx} title={item.get('title', '')} | "
+            f"summary={note or '(empty)'} | fallback={is_fallback}"
+        )
+
+    print(
+        f"📊 [{category_name}] 新聞數量={len(items)} / 成功摘要數量={success_count} / fallback={len(items) - success_count}"
+    )
+
+
 def main():
     if not LINE_TOKEN:
         print("❌ 錯誤：找不到 LINE_TOKEN，請檢查 .env 或 config.py")
@@ -63,6 +92,7 @@ def main():
     # 參數有 test 就走測試；否則走正式廣播
     is_test = len(sys.argv) > 1 and sys.argv[1].lower() == "test"
     print(f"--- 啟動模式：{'測試模式' if is_test else '正式廣播'} ---")
+    log_runtime_context()
 
     # 1) 抓取各分類新聞
     print("📡 正在從 Google News 抓取戰報...")
@@ -104,6 +134,10 @@ def main():
                 it["note"] = n
     else:
         print("⚠️ AI 生成內容為空，將使用預設摘要。")
+
+    log_category_summary_mapping("Arsenal", arsenal)
+    log_category_summary_mapping("Spain", spain)
+    log_category_summary_mapping("Leclerc / F1", f1)
 
     # 4) 構建並發送 LINE 訊息
     print("🎨 正在構建 Flex Message 介面...")
